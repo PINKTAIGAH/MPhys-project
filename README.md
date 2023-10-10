@@ -1,6 +1,6 @@
 # MPhys-project
 
-A repository to hold scripts and jupyter notebooks used throughout MPhys progect
+A repository to hold scripts and jupyter notebooks used throughout MPhys project
 
 ## Pre-requisites
 
