@@ -19,6 +19,8 @@ class LinearBlock(nn.Module):
                 activationFunction = nn.GELU()
             case "sigmoid":
                 activationFunction = nn.Sigmoid()
+            case "softmax":
+                activationFunction = nn.Softmax(dim=0)
             case _:
                 raise Exception(f"{act} is not a recognised activation function for this class")
 
