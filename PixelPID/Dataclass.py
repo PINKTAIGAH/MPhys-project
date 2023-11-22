@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+import time
+import math
 import os
 import json
 from larcv.config_builder import ConfigBuilder
@@ -14,7 +16,7 @@ class NumberProtonDataset(Dataset):
     The structure of the labels is one hot encoded where 0 proton -> [1, 0, 0, 0], 1 proton -> [0, 1, 0, 0],
     2 proton -> [0, 0, 1, 0], more than 2 proton -> [0, 0, 0, 1]
     """
-    def __init__(self, rootDirectory, maxVoxels=2000, maxParticles=20, length=1, imageDims=1024, nClasses=4):
+    def __init__(self, rootDirectory, maxVoxels=2000, maxParticles=20, length=1, imageDims=1024, nClasses=4, wireAngle=35.7, threeDimentional=False):
         """
         Initialise the larcv batch loader
         """
@@ -28,6 +30,12 @@ class NumberProtonDataset(Dataset):
         self.maxVoxels = maxVoxels
         self.maxParticles = maxParticles
         self.batchSize = 1                                  # Batch size will equal 1 as we only want to return one data point       
+        self.threeDimentional = threeDimentional
+        self.wireAngles = {
+            "U":            wireAngle,
+            "V":            -wireAngle,
+            "W":            0.0
+        }
 
         # Define name of config builder
         self.configBuilderName = "default"
@@ -64,7 +72,7 @@ class NumberProtonDataset(Dataset):
 
         # Add image data to config builder
         self.configBuilder.add_batch_filler(
-            datatype  = "sparse2d",
+            datatype  = "sparse3d",
             producer  = "dunevoxels",
             name      = self.configBuilderName+"Data", 
             MaxVoxels = self.maxVoxels, 
@@ -113,22 +121,55 @@ class NumberProtonDataset(Dataset):
         dataDictionary = self.queueInterface.fetch_minibatch_data(self.configBuilderName, pop=True, fetch_meta_data=True)
         return dataDictionary
     
-    def pointcloudToImage(self, pointcloud,):
+    def pointcloudToImage3D(self, pointcloud,):
         """
         Convert a pointcloud to it's corresponding image of sdimentions defined in constructor of the class
         """
 
         # Create empty image of specified dimentions
-        image = np.zeros((self.imageDims, self.imageDims))
+        image = np.zeros((self.imageDims, self.imageDims, self.imageDims))
         
         # Iterate and assing each point in pointcloud to image
         for point in pointcloud[0]:
-            x, y, pixelValue = point
+            x, y, z, pixelValue = point
             # Check of valid points
-            if (x >= 0) and (y >= 0):
-                image[int(y-1)][int(x-1)] = pixelValue
+            if (x >= 0) and (y >= 0) and (z >= 0):
+                image[int(z-1)][int(y-1)][int(x-1)] = pixelValue
         
         return image
+    
+    def pointcloudToWirePlanes(self, pointcloud, nPlanes=3):
+        """
+        Convert pointcloud to three wire plane projections
+        """
+
+        # Empty array to contain wire plane images, structure of list is [U, V, W]
+        wirePlaneImages = []
+
+        # Iterate and assing each point in pointcloud to image
+        x, y, z, pixelValue = np.split(pointcloud[0], 4, axis=-1)
+        
+        # Create mask of non zero index
+        nonZeroIndex = np.where(pixelValue != -999)
+
+        # Compute, Assign and save images for each plane
+        for idx in range(nPlanes):
+            # Initialise empty image
+            image = np.zeros((self.imageDims, self.imageDims))
+            
+            # Compute projections
+            xProjection = math.cos(list(self.wireAngles.values())[idx])*z[nonZeroIndex] + math.sin(list(self.wireAngles.values())[idx])*y[nonZeroIndex]
+            yProjection = x[nonZeroIndex]
+            valProjection = pixelValue[nonZeroIndex]
+
+            # Assign values to projection
+            for idx in range(len(xProjection)):
+                image[int(yProjection[idx])][int(xProjection[idx])] = valProjection[idx]
+
+            # Append image to projection lists
+            wirePlaneImages.append(image)
+
+        return wirePlaneImages
 
 
     def __len__(self):
@@ -144,7 +185,7 @@ class NumberProtonDataset(Dataset):
         # Obtain pointcloud from the image label of dictionary
         # Squeeze the first axis as we only have one batch size
         pointcloud = np.squeeze(dataDictionary["image"], 0)
-        image = torch.tensor(self.pointcloudToImage(pointcloud))
+        planeU, planeV, planeW = self.pointcloudToWirePlanes(pointcloud) 
 
         # Obtain the PDG code of the parent neutrino of the interaction
         nProton = dataDictionary["label"]["_pdg"][0][0]
@@ -161,19 +202,22 @@ class NumberProtonDataset(Dataset):
             case _:
                 label[3] = 1
 
-        return image, label
+        return planeU, planeV, planeW, label
 
 def test():
 
     dataset = NumberProtonDataset("/home/giorgio/Desktop/train", imageDims=2000, length=1000)
-    label_sum = torch.zeros(4)
-    for idx in range(5):
-        image, label = dataset[idx]
-        label_sum+=label
-        print(label)
-        plt.imshow(image, cmap="jet")
+    for idx in range(8):
+        fig, axes = plt.subplots(1, 3)
+        t1 = time.time()
+        U, V, W, label = dataset[idx]
+        print(f"Time to generate datapoint: {(time.time()-t1):.3f} seconds")
+        print(f"Labels: {label}")
+        axes[0].imshow(U, cmap="jet")
+        axes[1].imshow(V, cmap="jet")
+        axes[2].imshow(W, cmap="jet")
+        fig.tight_layout()
         plt.show()
-    print(label_sum)
 
 
 if __name__ == "__main__":
