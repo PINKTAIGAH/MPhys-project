@@ -1,128 +1,143 @@
 import torch
 import torch.nn as nn
-from convBlock import ConvBlock
+from convBlock import *
 from linearBlock import LinearBlock
 from residualBlock import *
 
-
-"""
-Model based on C. Adams et al. Journal of Instrumentation, Volume 15, April 2020
-"""
-
-class sparceNetPID(nn.Module):
-    def __init__(self, imageChannels, numClasses, imageDimentions=(64, 64, 64),
-                numFeatures=32, numResiduals=2):
-
+class SparceNetPID(nn.Module):
+    def __init__(self,imageChannels, numClasses, imageDimentions=(1080, 2048), 
+                 numFeatures=32, numResiduals=2,):
         super().__init__()
 
-        # Define initial block of the analiser
-        self.initialLayer = nn.Sequential(
-            ConvBlock(
-                imageChannels,
+        # Define number of classes
+        self.numClasses = numClasses
+
+        # Define initial block
+        initialBlock = nn.Sequential(
+            ConvBlock2D(
+                imageChannels, 
                 numFeatures,
                 act="leaky",
                 batchnorm=True,
-                kernel_size=7,
-                stride=2,
-                padding=3,               
-                bias=False,
-            ),
-            nn.BatchNorm3d(numFeatures),
-            nn.LeakyReLU(),
-            nn.MaxPool3d(kernel_size=3, stride=2, padding=1,),
+                kernel_size=5,
+                stride=1, 
+                padding=2,
+                bias=False
+            )
         )
 
-        # Define first residual block with 64 features
-        # Note: we use actual number in list as there is no downsample res block
-        resBlock1 = ResidualBlock(numFeatures, act="leaky", batchnorm=True)
-        
-        # Define second residual block with 128 features
+
+        # Define first resblock
+        resBlock1 = ResidualBlock2D(numFeatures, act="leaky", batchnorm=True)
+
+        # Define second resblock
         resBlock2 = nn.Sequential(
-            DownsampleResidualBlock(numFeatures, numFeatures*2, act="leaky"),
-            *[ResidualBlock(numFeatures*2, act="leaky", batchnorm=True) for _ in range(numResiduals)],
+            ConvBlock2D(numFeatures, 2*numFeatures, act="leaky", batchnorm=True, kernel_size=3, stride=2, padding=1, bias=False),
+            *[ResidualBlock2D(2*numFeatures, act="leaky", batchnorm=True) for _ in range(numResiduals)],
         )
 
-        # Define third residual block with 256 features
+        # Define third resblock
         resBlock3 = nn.Sequential(
-            DownsampleResidualBlock(numFeatures*2, numFeatures*4, act="leaky"),
-            *[ResidualBlock(numFeatures*4, act="leaky", batchnorm=True) for _ in range(numResiduals)],
+            ConvBlock2D(2*numFeatures, 3*numFeatures, act="leaky", batchnorm=True, kernel_size=3, stride=2, padding=1, bias=False),
+            *[ResidualBlock2D(3*numFeatures, act="leaky", batchnorm=True) for _ in range(numResiduals)],
         )
 
-        # Define fourth residual block with 512 features
+        # Define fourth resblock
         resBlock4 = nn.Sequential(
-            DownsampleResidualBlock(numFeatures*4, numFeatures*8, act="leaky"),
-            *[ResidualBlock(numFeatures*8, act="leaky", batchnorm=True) for _ in range(numResiduals)],
+            ConvBlock2D(3*numFeatures, 4*numFeatures, act="leaky", batchnorm=True, kernel_size=3, stride=2, padding=1, bias=False),
+            *[ResidualBlock2D(4*numFeatures, act="leaky", batchnorm=True) for _ in range(numResiduals)],
         )
 
-        # Define fifth residual block with 512 features
-        resBlock5 = nn.Sequential(
-            DownsampleResidualBlock(numFeatures*8, numFeatures*16, act="leaky"),
-            *[ResidualBlock(numFeatures*16, act="leaky", batchnorm=True) for _ in range(numResiduals)],
+        # Define Downsample convolution
+        downsample = nn.Sequential(
+            ConvBlock2D(4*numFeatures, 5*numFeatures, act="leaky", kernel_size=3, stride=2, padding=1, bias=False)
         )
 
-        # Define sixth residual block with 512 features
-        resBlock6 = nn.Sequential(
-            DownsampleResidualBlock(numFeatures*16, numFeatures*32, act="leaky"),
-            *[ResidualBlock(numFeatures*32, act="leaky", batchnorm=True) for _ in range(numResiduals)],
-        )
-
-        # Define seventh residual block with 512 features
-        resBlock7 = nn.Sequential(
-            DownsampleResidualBlock(numFeatures*32, numFeatures*64, act="leaky"),
-            *[ResidualBlock(numFeatures*64, act="leaky", batchnorm=True) for _ in range(numResiduals)],
-        )
-
-        self.resBlocksAll = nn.ModuleList([
+        # Construct first stage of convolutions to be applied ot each individual 2d image
+        self.totemPoleBlock = nn.ModuleList([
+            initialBlock,
             resBlock1,
             resBlock2,
             resBlock3,
             resBlock4,
+            downsample,
+        ])
+
+        # Define fifth resblock
+        resBlock5 = nn.Sequential(
+            *[ResidualBlock2D(3*5*numFeatures, "leaky", batchnorm=True) for _ in range(numResiduals+1)],
+        )
+
+        # Define sixth resblock
+        resBlock6 = nn.Sequential(
+            ConvBlock2D(3*5*numFeatures, 3*6*numFeatures, act="leaky", batchnorm=True, kernel_size=3, stride=2, padding=1, bias=False),
+            *[ResidualBlock2D(3*6*numFeatures, "leaky", batchnorm=True) for _ in range(numResiduals)],
+        )
+
+        # Define seventh resblock
+        resBlock7 = nn.Sequential(
+            ConvBlock2D(3*6*numFeatures, 3*7*numFeatures, act="leaky", batchnorm=True, kernel_size=3, stride=2, padding=1, bias=False),
+            *[ResidualBlock2D(3*7*numFeatures, "leaky", batchnorm=True) for _ in range(numResiduals)],
+        )
+
+        # Define bottleneck
+        bottleneck = ConvBlock2D(3*7*numFeatures, imageChannels, act="leaky", kernel_size=3, stride=1, padding=1, bias=False)
+
+        # Define second stage of convolutions
+        self.concatonatedBlock = nn.ModuleList([
             resBlock5,
             resBlock6,
             resBlock7,
+            bottleneck,
         ])
-        
-        # We know that the hight and width of the latent tensor after all resnet is (B, 512, H/2**7, W/2**7, L/2**7)
-        # Define number of nodes in linear layers
-        productLatentDimentions = int((imageDimentions[0]/256) * (imageDimentions[1]/256) * (imageDimentions[2]/236))
-        flattenedInFeatures = numFeatures*64*productLatentDimentions
-        
-        self.denseBlocks = nn.ModuleList([
+
+    def getDenseLayer(self, inFeatures, outFeatures):
+        """
+        Construct a dense layer with correct dimentions
+        """
+
+        denseLayer = nn.Sequential(
             LinearBlock(
-                flattenedInFeatures,
-                numClasses,
-                act="softmax",
-                flatten=True,
-                bias=True
-            ),
-        ])
+                inFeatures,
+                outFeatures,
+                act = "sigmoid",
+                flatten = True,
+                bias = True, 
+            )
+        )
 
+        return denseLayer 
 
-    def forward(self, x):
-
-        # Apply initial layer
-        x = self.initialLayer(x)        # Size: (B, 32, H/2, W/2, L/2)
-
-        # Apply all resnet layers
-        for layer in self.resBlocksAll:
+    def forward(self, x, y, z, device="cpu"):
+        # Apply siamese tower block to each image plane
+        for layer in self.totemPoleBlock:
             x = layer(x)
- 
-        # Apply linear layers 
-        for layer in self.denseBlocks:
-            x = layer(x)
+            y = layer(y)
+            z = layer(z)
+        
+        # Concatenate three wire plane images
+        output = torch.concatenate([x, y, z], dim=1)
 
-        return x
+        # Apply second convolutinal blocks
+        for layer in self.concatonatedBlock:
+            output = layer(output)
 
+        # Get dense layer and apply it
+        outputFlattenedShape = torch.prod(torch.tensor(output.shape[1:])).item()
+        denseLayer = self.getDenseLayer(outputFlattenedShape, self.numClasses).to(device)
+        output = denseLayer(output)
+
+        return output
 
 def test():
-    DEVICE = "cpu"
-    CHANNELS = 1
-    N_CLASSES = 4
-    IMAGE_DIMENTIONS = (512, 512, 512)
-    input = torch.rand((1, 1, *IMAGE_DIMENTIONS)).to(DEVICE)
-    model = sparceNetPID(CHANNELS, N_CLASSES, IMAGE_DIMENTIONS).to(DEVICE)
-    output = model(input)
-    print(output.shape)
+    device = "cuda"
+    channels = 1
+    n_classes = 4
+    inputs = [torch.randn(1, 1, 640, 1024).to(device) for _ in range(3)]
+    model = SparceNetPID(channels, n_classes, imageDimentions=(540, 1024)).to(device)
+
+    model(*inputs, device)
 
 if __name__ == "__main__":
     test()
+

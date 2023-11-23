@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from convBlock import ConvBlock
+from convBlock import *
 
-class ResidualBlock(nn.Module):
+class ResidualBlock3D(nn.Module):
     # class for non-downsizing residual block
 
     def __init__(self,channels, act="leaky", batchnorm=True):
@@ -10,7 +10,7 @@ class ResidualBlock(nn.Module):
 
         # Define convolutional blocks in residual blocks
         self.resBlock = nn.Sequential(
-            ConvBlock(
+            ConvBlock3D(
                 channels, 
                 channels,
                 act=act,
@@ -20,7 +20,7 @@ class ResidualBlock(nn.Module):
                 padding=1,
                 bias=False,
             ),
-            ConvBlock(
+            ConvBlock3D(
                 channels,
                 channels,
                 act="identity",
@@ -38,7 +38,7 @@ class ResidualBlock(nn.Module):
         return x + self.resBlock(x) 
 
 
-class DownsampleResidualBlock(nn.Module):
+class DownsampleResidualBlock3D(nn.Module):
     # Basic Residual block
 
     def __init__(self, inChannels, outChannels, act="leaky", batchnorm=True):
@@ -46,7 +46,7 @@ class DownsampleResidualBlock(nn.Module):
 
         # Define convolutional blocks in residual blocks
         self.resBlockDown = nn.Sequential(
-            ConvBlock(
+            ConvBlock3D(
                 inChannels, 
                 outChannels,
                 act=act,
@@ -55,7 +55,7 @@ class DownsampleResidualBlock(nn.Module):
                 stride=2,
                 padding=1
             ),
-            ConvBlock(
+            ConvBlock3D(
                 outChannels, 
                 outChannels,
                 act="identity",
@@ -68,7 +68,7 @@ class DownsampleResidualBlock(nn.Module):
 
         # Define normal downsample convolution for resudial calculation in input is downsamples
         self.resBlockDownSkip = nn.Sequential(
-            ConvBlock(
+            ConvBlock3D(
                 inChannels,
                 outChannels,
                 act= "identity",
@@ -82,4 +82,86 @@ class DownsampleResidualBlock(nn.Module):
     def forward(self, x):
         # Define operations to be made to input when object is called
         
+        return self.resBlockDownSkip(x) + self.resBlockDown(x)
+
+class ResidualBlock2D(nn.Module):
+    # class for non-downsizing residual block
+
+    def __init__(self,channels, act="leaky", batchnorm=True):
+        super().__init__()
+
+        # Define convolutional blocks in residual blocks
+        self.resBlock = nn.Sequential(
+            ConvBlock2D(
+                channels, 
+                channels,
+                act=act,
+                batchnorm=batchnorm,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            ),
+            ConvBlock2D(
+                channels,
+                channels,
+                act="identity",
+                batchnorm=batchnorm,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            ),
+        )
+    
+    def forward(self, x):
+        # Define operations to be made to input when object is called
+        
+        return x + self.resBlock(x) 
+
+
+class DownsampleResidualBlock2D(nn.Module):
+    # Basic Residual block
+
+    def __init__(self, inChannels, outChannels, act="leaky", batchnorm=True):
+        super().__init__()
+
+        # Define convolutional blocks in residual blocks
+        self.resBlockDown = nn.Sequential(
+            ConvBlock2D(
+                inChannels, 
+                outChannels,
+                act=act,
+                batchnorm=batchnorm,
+                kernel_size=3,
+                stride=2,
+                padding=1
+            ),
+            ConvBlock2D(
+                outChannels, 
+                outChannels,
+                act="identity",
+                batchnorm=batchnorm,
+                kernel_size=3,
+                stride=1,
+                padding=1
+            ),
+        )
+
+        # Define normal downsample convolution for resudial calculation in input is downsamples
+        self.resBlockDownSkip = nn.Sequential(
+            ConvBlock2D(
+                inChannels,
+                outChannels,
+                act= "identity",
+                batchnorm=True,
+                kernel_size=1,
+                stride=2,
+                padding=0
+            ),      
+        )
+        
+    def forward(self, x):
+        # Define operations to be made to input when object is called
+
         return self.resBlockDownSkip(x) + self.resBlockDown(x)

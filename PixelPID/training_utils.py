@@ -1,7 +1,7 @@
 import numpy as np, torch, torchvision as tv
 import sklearn.metrics as skm
 
-def train_model(model, epochs, criterion, optimizer, dataloaders, dataset_sizes, device, output_filename):
+def train_model(model, epochs, criterion, optimizer, dataloaders, dataset_sizes, device, ):
     """Runs the training loop for a model
 
         Args:
@@ -39,10 +39,12 @@ def train_model(model, epochs, criterion, optimizer, dataloaders, dataset_sizes,
             running_loss = 0.0
 
             # iterate over the batches in the current dataloader
-            for b, (inputs, labels) in enumerate(dataloaders[phase]):
+            for b, (uPlane, vPlane, wPlane, labels) in enumerate(dataloaders[phase]):
                 # transfer the inputs and the labels to the GPU
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+                uPlane = uPlane.type(torch.float32).to(device)
+                vPlane = vPlane.type(torch.float32).to(device)
+                wPlane = wPlane.type(torch.float32).to(device)
+                labels = labels.type(torch.LongTensor).to(device)
                 model.to(device)
 
                 optimizer.zero_grad()
@@ -50,8 +52,7 @@ def train_model(model, epochs, criterion, optimizer, dataloaders, dataset_sizes,
                 # operations on the model should compute and track gradients during training, but not during validation
                 with torch.set_grad_enabled(phase == 'train'):
                     # TASK - run the network over the input images
-                    outputs = model(inputs)
-
+                    outputs = model(uPlane, vPlane, wPlane, device)
                     loss = criterion(outputs, labels) # replace the placeholders with suitable values to compute the loss function
                     _, preds = torch.max(outputs, 1) # to which dimension should the network output be reduced? Think about the structure of outputs, what does it look like after each call?
 
@@ -65,7 +66,7 @@ def train_model(model, epochs, criterion, optimizer, dataloaders, dataset_sizes,
 
                 # Keep track of the running loss, factoring batch size - the final batch can sometimes be smaller than
                 # the specified batch size, so we need to account for that to ensure a correct loss for each epoch
-                running_loss += loss.item() * inputs.size(0)
+                running_loss += loss.item() * uPlane.size(0)
 
             # calculate the loss, accuracy and f1 score for the epoch (stored in statistics)
             update_statistics(statistics[phase], running_loss / dataset_sizes[phase], predictions, truths)
@@ -91,8 +92,8 @@ def update_statistics(phase_statistics, loss, predictions, truths):
             predicitions: The network predictions for the epoch
             truths: The true classifications
     """
-    preds_flat = torch.cat(predictions).cpu().numpy()
-    truths_flat = torch.cat(truths).cpu().numpy()
+    preds_flat = torch.cat(predictions).cpu().numpy().flatten()
+    truths_flat = torch.cat(truths).cpu().numpy().flatten()
     phase_statistics['loss'].append(loss)
     phase_statistics['accuracy'].append(skm.accuracy_score(truths_flat, preds_flat))
     phase_statistics['f1'].append(skm.f1_score(truths_flat, preds_flat, average='macro'))
